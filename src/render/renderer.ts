@@ -8,6 +8,29 @@ import {
   createPlaceholderTexture,
 } from './textures';
 
+/**
+ * Largest box of the given aspect (width / height) that fits in availW × availH.
+ * A null aspect fills the space.
+ */
+export function fitBox(
+  availW: number,
+  availH: number,
+  aspect: number | null,
+): [number, number] {
+  if (aspect === null) return [availW, availH];
+  return availW / availH > aspect
+    ? [Math.max(1, Math.round(availH * aspect)), availH]
+    : [availW, Math.max(1, Math.round(availW / aspect))];
+}
+
+/** width / height, or null if either dimension is missing or nonsensical. */
+function toAspect(w: number | undefined, h: number | undefined): number | null {
+  if (!w || !h || !Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    return null;
+  }
+  return w / h;
+}
+
 const DEBUG_MODE_MAP: Record<DebugMode, number> = {
   final: 0,
   source: 1,
@@ -39,6 +62,11 @@ export class Renderer {
   private hasBlackLevel = false;
   private sourceSize: [number, number] = [1, 1];
   private warpSize: [number, number] = [1, 1];
+
+  // Aspects the canvas can be letterboxed to (width / height); null = unknown.
+  private regionAspect: number | null = null;
+  private sourceAspect: number | null = null;
+  private cssSize: [number, number] = [0, 0];
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -74,6 +102,10 @@ export class Renderer {
   loadRegion(region: Region) {
     const gl = this.gl;
 
+    // The region's output raster defines the preview's shape — not the source,
+    // which the warp is free to resample into a different aspect entirely.
+    this.regionAspect = toAspect(region.xResolution, region.yResolution);
+
     // Warp
     if (region.warpMap) {
       this.texWarp = uploadWarpTexture(gl, region.warpMap, this.texWarp);
@@ -106,6 +138,16 @@ export class Renderer {
     const gl = this.gl;
     this.texSource = uploadSourceTexture(gl, media.element, this.texSource);
     this.sourceSize = [media.width, media.height];
+    this.sourceAspect = toAspect(media.width, media.height);
+  }
+
+  /**
+   * Aspect the preview is letterboxed to: the region's output raster when an
+   * MPCDI region is loaded, falling back to the source when it isn't (or when
+   * the manifest omits a usable resolution). null = fill the pane.
+   */
+  get displayAspect(): number | null {
+    return this.regionAspect ?? this.sourceAspect;
   }
 
   /** Update source texture from video without recreating */
@@ -116,11 +158,31 @@ export class Renderer {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
   }
 
-  /** Resize the canvas to match its display size */
+  /**
+   * Fit the canvas inside its pane, letterboxed to `displayAspect` and centred.
+   * The drawing buffer tracks the fitted CSS box so pixels stay square —
+   * sizing the buffer to the pane instead would stretch the render.
+   */
   resize() {
+    const host = this.canvas.parentElement;
+    const availW = host ? host.clientWidth : this.canvas.clientWidth;
+    const availH = host ? host.clientHeight : this.canvas.clientHeight;
+    if (availW <= 0 || availH <= 0) return;
+
+    const [cssW, cssH] = fitBox(availW, availH, this.displayAspect);
+
+    if (this.cssSize[0] !== cssW || this.cssSize[1] !== cssH) {
+      this.cssSize = [cssW, cssH];
+      const style = this.canvas.style;
+      style.width = `${cssW}px`;
+      style.height = `${cssH}px`;
+      style.left = `${Math.round((availW - cssW) / 2)}px`;
+      style.top = `${Math.round((availH - cssH) / 2)}px`;
+    }
+
     const dpr = window.devicePixelRatio || 1;
-    const w = this.canvas.clientWidth * dpr;
-    const h = this.canvas.clientHeight * dpr;
+    const w = Math.max(1, Math.round(cssW * dpr));
+    const h = Math.max(1, Math.round(cssH * dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
