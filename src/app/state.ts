@@ -71,6 +71,21 @@ export class AppState {
     this.update();
   }
 
+  setFlipScreenY(v: boolean) {
+    this.settings.warp.flipScreenY = v;
+    this.update();
+  }
+
+  setRegionLocal(v: boolean) {
+    this.settings.warp.regionLocal = v;
+    this.update();
+  }
+
+  setAlphaLinearize(v: boolean) {
+    this.settings.alphaLinearize = v;
+    this.update();
+  }
+
   setInverseMapping(v: boolean) {
     this.settings.warp.inverseMapping = v;
     this.update();

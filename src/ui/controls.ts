@@ -36,8 +36,17 @@ export function initUI(state: AppState) {
   const chkFlipY = document.getElementById('warp-flipy') as HTMLInputElement;
   chkFlipY.addEventListener('change', () => state.setFlipY(chkFlipY.checked));
 
+  const chkFlipScreenY = document.getElementById('warp-flipscreeny') as HTMLInputElement;
+  chkFlipScreenY.addEventListener('change', () => state.setFlipScreenY(chkFlipScreenY.checked));
+
+  const chkRegionLocal = document.getElementById('warp-regionlocal') as HTMLInputElement;
+  chkRegionLocal.addEventListener('change', () => state.setRegionLocal(chkRegionLocal.checked));
+
   const chkInverse = document.getElementById('warp-inverse') as HTMLInputElement;
   chkInverse.addEventListener('change', () => state.setInverseMapping(chkInverse.checked));
+
+  const chkAlphaLin = document.getElementById('opt-alphalin') as HTMLInputElement;
+  chkAlphaLin.addEventListener('change', () => state.setAlphaLinearize(chkAlphaLin.checked));
 
   // ── Blend toggles ──────────────────────────────────────────────
   const chkBlend = document.getElementById('opt-blend') as HTMLInputElement;
@@ -112,12 +121,30 @@ function updateMetadata(state: AppState) {
       setText('meta-frustum', '—');
     }
 
-    setText('meta-warpsize', region.warpMap
-      ? `${region.warpMap.width}×${region.warpMap.height}`
-      : 'none');
-    setText('meta-blendsize', region.blendMaps.alphaMap
-      ? `${region.blendMaps.alphaMap.width}×${region.blendMaps.alphaMap.height}`
-      : 'none');
+    setText('meta-rect',
+      `${region.x.toFixed(4)}, ${region.y.toFixed(4)} + ` +
+      `${region.xSize.toFixed(4)}×${region.ySize.toFixed(4)}`);
+
+    if (region.warpMap) {
+      const s = region.warpMap.stats;
+      setText('meta-warpsize', `${region.warpMap.width}×${region.warpMap.height}`);
+      setText('meta-warpu', `[${s.minX.toFixed(4)}, ${s.maxX.toFixed(4)}]`);
+      setText('meta-warpv', `[${s.minY.toFixed(4)}, ${s.maxY.toFixed(4)}]`);
+      const pct = (100 * s.nanCount / s.totalTexels).toFixed(2);
+      setText('meta-nan', `${s.nanCount} texels (${pct}%)`);
+      setText('meta-coordspace', s.looksNormalized ? 'normalized [0,1]' : 'absolute (pixels)');
+    } else {
+      setText('meta-warpsize', 'none');
+      setText('meta-warpu', '—');
+      setText('meta-warpv', '—');
+      setText('meta-nan', '—');
+      setText('meta-coordspace', '—');
+    }
+
+    const alpha = region.blendMaps.alphaMap;
+    setText('meta-blendsize', alpha ? `${alpha.width}×${alpha.height}` : 'none');
+    setText('meta-alphagamma', alpha?.gammaEmbedded != null
+      ? String(alpha.gammaEmbedded) : '—');
   }
 
   setText('meta-source', media ? `${media.name} (${media.width}×${media.height})` : '—');

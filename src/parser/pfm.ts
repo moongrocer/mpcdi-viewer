@@ -1,14 +1,17 @@
+import type { WarpStats } from '../model/types';
+
 /**
  * PFM (Portable Float Map) parser.
  *
- * PFM format:
- *   Line 1: "PF" (color, 3-channel) or "Pf" (grayscale, 1-channel)
+ *   Line 1: "PF" (3-channel) or "Pf" (1-channel)
  *   Line 2: "<width> <height>"
- *   Line 3: scale factor (negative = little-endian, positive = big-endian)
- *   Remainder: raw float32 pixel data, bottom-to-top scanlines
+ *   Line 3: scale factor — negative means little-endian
+ *   Then:   raw float32 pixel data, BOTTOM-to-TOP scanlines
  *
- * For MPCDI warp maps: typically PF (3-channel): R=x, G=y, B=intensity.
- * The data is stored bottom-row-first in the file, so we flip to top-row-first.
+ * MPCDI geometry warp files are "PF": R = content U, G = content V,
+ * B = unused/zero in every producer we've seen. Unmapped projector
+ * pixels are written as NaN, which must be preserved (not zeroed) so
+ * the renderer can mask them out.
  */
 
 export interface PfmResult {
@@ -26,78 +29,92 @@ export function parsePFM(buffer: ArrayBuffer): PfmResult {
     let line = '';
     while (pos < bytes.length) {
       const ch = bytes[pos++];
-      if (ch === 0x0a) break; // newline
-      if (ch !== 0x0d) line += String.fromCharCode(ch); // skip CR
+      if (ch === 0x0a) break;
+      if (ch !== 0x0d) line += String.fromCharCode(ch);
     }
     return line;
   }
 
-  // Line 1: magic
-  const magic = readLine();
+  const magic = readLine().trim();
   let channels: number;
   if (magic === 'PF') channels = 3;
   else if (magic === 'Pf') channels = 1;
   else throw new Error(`Invalid PFM magic: "${magic}"`);
 
-  // Line 2: dimensions
   const dims = readLine().trim().split(/\s+/);
   const width = parseInt(dims[0], 10);
   const height = parseInt(dims[1], 10);
-  if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     throw new Error(`Invalid PFM dimensions: ${dims.join(' ')}`);
   }
 
-  // Line 3: scale (sign encodes endianness)
-  const scaleStr = readLine().trim();
-  const scale = parseFloat(scaleStr);
-  if (isNaN(scale) || scale === 0) {
-    throw new Error(`Invalid PFM scale: ${scaleStr}`);
+  const scale = parseFloat(readLine().trim());
+  if (!Number.isFinite(scale) || scale === 0) {
+    throw new Error(`Invalid PFM scale factor`);
   }
   const littleEndian = scale < 0;
 
-  // Remaining bytes: float32 pixel data
   const pixelCount = width * height * channels;
   const expectedBytes = pixelCount * 4;
-  const rawBytes = bytes.subarray(pos, pos + expectedBytes);
-
-  if (rawBytes.length < expectedBytes) {
-    throw new Error(
-      `PFM data truncated: expected ${expectedBytes} bytes, got ${rawBytes.length}`
-    );
+  const raw = bytes.subarray(pos, pos + expectedBytes);
+  if (raw.length < expectedBytes) {
+    throw new Error(`PFM truncated: expected ${expectedBytes} bytes, got ${raw.length}`);
   }
 
-  // Read floats respecting endianness
-  const dataView = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
-  const pixelsBottomUp = new Float32Array(pixelCount);
+  const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+  const bottomUp = new Float32Array(pixelCount);
   for (let i = 0; i < pixelCount; i++) {
-    pixelsBottomUp[i] = dataView.getFloat32(i * 4, littleEndian);
+    bottomUp[i] = view.getFloat32(i * 4, littleEndian);
   }
 
-  // PFM stores rows bottom-to-top. Flip to top-to-top (standard image order).
+  // PFM scanlines run bottom-to-top. Flip to top-first so the array
+  // matches how WebGL uploads texture rows.
   const rowFloats = width * channels;
   const data = new Float32Array(pixelCount);
   for (let y = 0; y < height; y++) {
-    const srcRow = height - 1 - y;
-    const srcOff = srcRow * rowFloats;
-    const dstOff = y * rowFloats;
-    data.set(pixelsBottomUp.subarray(srcOff, srcOff + rowFloats), dstOff);
+    const src = (height - 1 - y) * rowFloats;
+    data.set(bottomUp.subarray(src, src + rowFloats), y * rowFloats);
   }
 
   return { width, height, channels, data };
 }
 
-/**
- * Normalize a 3-channel PFM warp map to a Float32Array with 3 floats per pixel.
- * If input is 1-channel, expand to 3 channels (value, 0, 0).
- */
+/** Expand 1-channel PFM to 3-channel; pass 3-channel through unchanged. */
 export function normalizeWarpData(pfm: PfmResult): Float32Array {
   if (pfm.channels === 3) return pfm.data;
-  // Expand 1-channel to 3-channel
   const out = new Float32Array(pfm.width * pfm.height * 3);
   for (let i = 0; i < pfm.width * pfm.height; i++) {
     out[i * 3] = pfm.data[i];
-    out[i * 3 + 1] = 0;
-    out[i * 3 + 2] = 0;
   }
   return out;
+}
+
+/**
+ * Measure the warp map so the UI can report whether coordinates look
+ * normalized or absolute, and how much of the frame is unmapped.
+ * NaN texels are counted separately rather than skewing the range.
+ */
+export function computeWarpStats(data: Float32Array, width: number, height: number): WarpStats {
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let nanCount = 0;
+  const total = width * height;
+
+  for (let i = 0; i < total; i++) {
+    const x = data[i * 3];
+    const y = data[i * 3 + 1];
+    if (Number.isNaN(x) || Number.isNaN(y)) { nanCount++; continue; }
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+
+  if (!Number.isFinite(minX)) { minX = maxX = minY = maxY = 0; }
+
+  // Values comfortably inside [0,1] indicate normalized coordinates;
+  // anything much larger is almost certainly absolute pixel values.
+  const looksNormalized = maxX <= 1.001 && maxY <= 1.001 && minX >= -0.001 && minY >= -0.001;
+
+  return { minX, maxX, minY, maxY, nanCount, totalTexels: total, looksNormalized };
 }

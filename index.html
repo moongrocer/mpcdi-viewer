@@ -233,12 +233,11 @@
       position: relative;
       overflow: hidden;
     }
-    /* Size and position are set by Renderer.resize(), which letterboxes the
-       canvas to the source aspect ratio and centres it in the pane. */
     #viewport canvas {
       position: absolute;
       top: 0; left: 0;
-      display: block;
+      width: 100%;
+      height: 100%;
     }
     #viewport .empty-msg {
       position: absolute;
@@ -252,7 +251,9 @@
       pointer-events: none;
     }
 
-    /* Video transport — overlays the bottom of the viewport when a video is loaded */
+    /* Video transport — overlays the bottom of the viewport when a video is
+       loaded. It lives outside the #app grid, so without this it would render
+       below the 100vh layout and be unreachable. */
     #transport {
       display: none;
       position: fixed;
@@ -373,8 +374,14 @@
             <span class="meta-key">region</span><span class="meta-val" id="meta-region">—</span>
             <span class="meta-key">resolution</span><span class="meta-val" id="meta-resolution">—</span>
             <span class="meta-key">frustum</span><span class="meta-val" id="meta-frustum">—</span>
+            <span class="meta-key">region rect</span><span class="meta-val" id="meta-rect">—</span>
             <span class="meta-key">warp size</span><span class="meta-val" id="meta-warpsize">—</span>
+            <span class="meta-key">warp U</span><span class="meta-val" id="meta-warpu">—</span>
+            <span class="meta-key">warp V</span><span class="meta-val" id="meta-warpv">—</span>
+            <span class="meta-key">unmapped</span><span class="meta-val" id="meta-nan">—</span>
+            <span class="meta-key">coord space</span><span class="meta-val" id="meta-coordspace">—</span>
             <span class="meta-key">blend size</span><span class="meta-val" id="meta-blendsize">—</span>
+            <span class="meta-key">alpha gamma</span><span class="meta-val" id="meta-alphagamma">—</span>
             <span class="meta-key">source</span><span class="meta-val" id="meta-source">—</span>
           </div>
         </div>
@@ -406,8 +413,16 @@
             </select>
           </label>
           <div class="toggle-row">
-            <span class="toggle-label">Flip Y</span>
+            <span class="toggle-label">Flip Y (content UV)</span>
             <label class="switch"><input type="checkbox" id="warp-flipy" /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Flip Y (warp lookup)</span>
+            <label class="switch"><input type="checkbox" id="warp-flipscreeny" /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Region-local remap</span>
+            <label class="switch"><input type="checkbox" id="warp-regionlocal" /><span class="slider"></span></label>
           </div>
           <div class="toggle-row">
             <span class="toggle-label">Inverse mapping</span>
@@ -423,6 +438,10 @@
           <div class="toggle-row">
             <span class="toggle-label">Blend</span>
             <label class="switch"><input type="checkbox" id="opt-blend" checked /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Linearize alpha (gamma)</span>
+            <label class="switch"><input type="checkbox" id="opt-alphalin" /><span class="slider"></span></label>
           </div>
           <div class="toggle-row">
             <span class="toggle-label">Black-level comp.</span>

@@ -14,6 +14,17 @@ export interface Frustum {
   downAngle: number;
 }
 
+/** Measured statistics of a warp map — used to validate interpretation */
+export interface WarpStats {
+  minX: number; maxX: number;
+  minY: number; maxY: number;
+  /** Count of NaN / unmapped texels */
+  nanCount: number;
+  totalTexels: number;
+  /** True if all finite values fall inside [0,1] → normalized coords */
+  looksNormalized: boolean;
+}
+
 /** A single PFM-derived warp map */
 export interface WarpMap {
   width: number;
@@ -22,6 +33,7 @@ export interface WarpMap {
   data: Float32Array;
   /** path inside the mpcdi archive */
   path: string;
+  stats: WarpStats;
 }
 
 /** Blend / correction map (loaded from PNG, stored as normalized float) */
@@ -31,6 +43,8 @@ export interface BlendMap {
   /** Single-channel float [0..1] */
   data: Float32Array;
   path: string;
+  /** gammaEmbedded declared in the manifest, if present (typically 2.2) */
+  gammaEmbedded?: number;
 }
 
 /** Full set of optional correction maps */
@@ -76,15 +90,22 @@ export type CoordSpace = 'normalized' | 'absolute';
 
 export interface WarpInterpretation {
   coordSpace: CoordSpace;
+  /** Flip V of the content UV produced by the warp map */
   flipY: boolean;
+  /** Flip V used to *read* the warp map (screen-side orientation) */
+  flipScreenY: boolean;
   /** If true, the warp map is treated as inverse (screen→source) rather than forward (source→screen) */
   inverseMapping: boolean;
+  /** Rescale full-display content UVs into region-local [0,1] */
+  regionLocal: boolean;
 }
 
 export const DEFAULT_WARP_INTERPRETATION: WarpInterpretation = {
   coordSpace: 'normalized',
   flipY: false,
+  flipScreenY: false,
   inverseMapping: false,
+  regionLocal: false,
 };
 
 // ── Render settings ──────────────────────────────────────────────────
@@ -96,6 +117,9 @@ export interface RenderSettings {
   blendEnabled: boolean;
   blackLevelEnabled: boolean;
   boundsOverlay: boolean;
+  /** Undo the gammaEmbedded baked into the alpha PNG before blending */
+  alphaLinearize: boolean;
+  alphaGamma: number;
   warp: WarpInterpretation;
 }
 
@@ -104,6 +128,8 @@ export const DEFAULT_RENDER_SETTINGS: RenderSettings = {
   blendEnabled: true,
   blackLevelEnabled: true,
   boundsOverlay: false,
+  alphaLinearize: false,
+  alphaGamma: 2.2,
   warp: { ...DEFAULT_WARP_INTERPRETATION },
 };
 
