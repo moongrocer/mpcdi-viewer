@@ -43,7 +43,8 @@ uniform bool uBlackLevelEnabled;
 uniform bool uBoundsOverlay;
 
 // Warp interpretation
-uniform bool  uWarpFlipY;       // flip the V of the *resulting* content UV
+uniform bool  uWarpFlipY;       // override: undo the standard bottom-left
+                                // origin assumption for the content UV
 uniform bool  uWarpFlipScreenY; // flip the V used to *read* the warp map
 uniform bool  uWarpInverse;
 uniform int   uWarpCoords;      // 0=normalized 1=absolute
@@ -141,10 +142,21 @@ void main() {
     mapped = isValidUV(uv);
 
     // Optionally rescale from full-display space into region-local
-    // [0,1] so a single projector's slice fills the frame.
+    // [0,1] so a single projector's slice fills the frame. Done before
+    // the V inversion below, because the region rect from the manifest
+    // is expressed in the same bottom-left-origin content space as the
+    // warp values.
     if (uRegionLocal && mapped) {
       uv = (uv - uRegionRect.xy) / uRegionRect.zw;
     }
+
+    // MPCDI content coordinates use a BOTTOM-left origin: V=1 addresses
+    // the top of the content. Our source texture is uploaded top-row-
+    // first (V=0 = top), so V must be inverted here. Without this the
+    // output is mirrored vertically. Verified against the warp maps in
+    // Calib_240731.mpcdi, where V runs 1.0 at the top projector row down
+    // to 0.0 at the bottom.
+    uv.y = 1.0 - uv.y;
 
     contentUV = uv;
   }
